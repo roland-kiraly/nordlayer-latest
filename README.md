@@ -35,7 +35,7 @@ yay -S nordlayer-bin
 ### Building the package manually:
 
 ```sh
-git clone https://github.com/raverecursion/nordlayer-latest.git
+git clone https://github.com/alexanderkogan/nordlayer-latest.git
 cd nordlayer-latest
 makepkg -si
 # If 'makepkg -si' fails to install automatically:
