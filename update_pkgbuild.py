@@ -12,6 +12,21 @@ PACKAGES = [
     {'name': 'nordlayer-bin', 'dir': 'nordlayer-bin'},
 ]
 
+DEB_BASE_URL = (
+    "https://downloads.nordlayer.com/linux/latest/debian/pool/main"
+)
+
+PACKAGES_INDEX_URL = (
+    "https://downloads.nordlayer.com/linux/latest/debian/"
+    "dists/stable/main/binary-amd64/Packages"
+)
+
+REQ_HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                  'AppleWebKit/537.36 (KHTML, like Gecko) '
+                  'Chrome/58.0.3029.110 Safari/537.36'
+}
+
 
 def parse_version(version_str):
     """Parse version string into tuple of integers for comparison."""
@@ -21,18 +36,51 @@ def parse_version(version_str):
         return (0, 0, 0)
 
 
-def get_latest_version():
-    """Get the latest NordLayer version by scraping the help page, with API fallback."""
-    req_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/58.0.3029.110 Safari/537.36'
-    }
+def deb_url_for(version):
+    return f"{DEB_BASE_URL}/nordlayer_{version}_amd64.deb"
 
+
+def validate_deb_exists(version):
+    """Return True if the .deb for *version* is actually downloadable."""
+    try:
+        resp = requests.head(
+            deb_url_for(version), headers=REQ_HEADERS, timeout=15,
+            allow_redirects=True,
+        )
+        return resp.status_code == 200
+    except requests.RequestException:
+        return False
+
+
+def _version_from_packages_index():
+    """Parse the Debian Packages index — the authoritative repository metadata."""
+    try:
+        resp = requests.get(PACKAGES_INDEX_URL, headers=REQ_HEADERS, timeout=15)
+        resp.raise_for_status()
+        for paragraph in resp.text.split('\n\n'):
+            if not paragraph.strip():
+                continue
+            pkg_name = None
+            pkg_version = None
+            for line in paragraph.splitlines():
+                if line.startswith('Package:'):
+                    pkg_name = line.split(':', 1)[1].strip()
+                elif line.startswith('Version:'):
+                    pkg_version = line.split(':', 1)[1].strip()
+            if pkg_name == 'nordlayer' and pkg_version:
+                if re.match(r'^\d+\.\d+\.\d+$', pkg_version):
+                    return pkg_version
+    except requests.RequestException:
+        pass
+    return None
+
+
+def _version_from_html():
+    """Scrape the help page changelog for a version number."""
     try:
         response = requests.get(
             'https://help.nordlayer.com/docs/linux',
-            headers=req_headers,
+            headers=REQ_HEADERS,
             timeout=15,
         )
         response.raise_for_status()
@@ -54,7 +102,11 @@ def get_latest_version():
                 return match.group(1)
     except requests.RequestException:
         pass
+    return None
 
+
+def _version_from_api():
+    """Query the simple version API endpoint."""
     try:
         resp = requests.get(
             'https://downloads.nordlayer.com/linux/latest/version', timeout=10
@@ -65,6 +117,31 @@ def get_latest_version():
             return version
     except requests.RequestException:
         pass
+    return None
+
+
+def get_latest_version():
+    """Determine the latest *downloadable* NordLayer version.
+
+    Sources are tried from most to least authoritative.  Every candidate
+    is validated with a HEAD request against the actual .deb URL so the
+    script never updates to a version whose package cannot be fetched.
+    """
+    sources = [
+        ('Debian Packages index', _version_from_packages_index),
+        ('help-page HTML', _version_from_html),
+        ('version API', _version_from_api),
+    ]
+
+    for label, fetch in sources:
+        version = fetch()
+        if version is None:
+            print(f'  [{label}] no version found')
+            continue
+        if validate_deb_exists(version):
+            print(f'  [{label}] version {version} — .deb verified')
+            return version
+        print(f'  [{label}] version {version} — .deb NOT found, skipping')
 
     return None
 
@@ -97,21 +174,13 @@ def update_pkgver(pkg_dir, version):
 
 def download_deb(version):
     """Download the .deb package for the given version."""
-    url = (
-        f"https://downloads.nordlayer.com/linux/latest/debian/pool/main/"
-        f"nordlayer_{version}_amd64.deb"
-    )
+    url = deb_url_for(version)
     filename = f"nordlayer_{version}_amd64.deb"
     if os.path.exists(filename):
         print(f"  Using cached {filename}")
         return filename
 
-    req_headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-                      'AppleWebKit/537.36 (KHTML, like Gecko) '
-                      'Chrome/58.0.3029.110 Safari/537.36'
-    }
-    response = requests.get(url, headers=req_headers, stream=True, timeout=120)
+    response = requests.get(url, headers=REQ_HEADERS, stream=True, timeout=120)
     response.raise_for_status()
     with open(filename, 'wb') as f:
         for chunk in response.iter_content(chunk_size=8192):
@@ -185,10 +254,11 @@ def generate_srcinfo(pkg_dir, checksum):
     replaces = get_array('replaces')
     options = get_array('options')
 
-    source_url = (
-        f"https://downloads.nordlayer.com/linux/latest/debian/pool/main/"
-        f"nordlayer_{pkgver}_amd64.deb"
-    )
+    source_urls = get_array('source_x86_64')
+    if source_urls:
+        source_url = source_urls[0].replace('${pkgver}', pkgver)
+    else:
+        source_url = deb_url_for(pkgver)
 
     lines = [f'pkgbase = {pkgname}']
     lines.append(f'\tpkgdesc = {pkgdesc}')
@@ -254,6 +324,7 @@ def update_package(pkg, latest_version, checksum):
 
 
 if __name__ == '__main__':
+    print('Detecting latest upstream version...')
     latest_version = get_latest_version()
     if not latest_version:
         print('Could not determine the latest version.')
