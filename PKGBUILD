@@ -2,7 +2,7 @@
 # https://github.com/raverecursion/nordlayer-latest/tree/master
 pkgname=nordlayer
 pkgver=3.4.3
-pkgrel=1
+pkgrel=2
 pkgdesc="Proprietary VPN client for Linux"
 arch=('x86_64')
 url="https://nordlayer.com"

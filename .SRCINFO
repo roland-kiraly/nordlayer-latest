@@ -1,7 +1,7 @@
 pkgbase = nordlayer
 	pkgdesc = Proprietary VPN client for Linux
 	pkgver = 3.4.3
-	pkgrel = 1
+	pkgrel = 2
 	url = https://nordlayer.com
 	install = nordlayer.install
 	arch = x86_64
