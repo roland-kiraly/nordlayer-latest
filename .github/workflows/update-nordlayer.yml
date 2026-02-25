@@ -75,6 +75,23 @@ jobs:
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/aur
 
+          # Function to push with retries
+          push_with_retry() {
+            local max_attempts=3
+            local attempt=1
+            while [ $attempt -le $max_attempts ]; do
+              echo "  Push attempt $attempt of $max_attempts..."
+              if git push 2>&1; then
+                return 0
+              fi
+              echo "  Push failed, waiting 10 seconds before retry..."
+              sleep 10
+              attempt=$((attempt + 1))
+            done
+            echo "  All push attempts failed"
+            return 1
+          }
+
           # Sync nordlayer
           echo "=== Syncing nordlayer ==="
           git clone ssh://aur@aur.archlinux.org/nordlayer.git aur-nordlayer
@@ -87,10 +104,12 @@ jobs:
             echo "nordlayer: AUR is already in sync"
           else
             git commit -m "Update to ${VERSION}-${PKGREL}"
-            git push
+            push_with_retry
             echo "nordlayer: Pushed to AUR"
           fi
           cd ..
+
+          sleep 5
 
           # Sync nordlayer-bin
           echo "=== Syncing nordlayer-bin ==="
@@ -104,7 +123,7 @@ jobs:
             echo "nordlayer-bin: AUR is already in sync"
           else
             git commit -m "Update to ${VERSION}-${PKGREL}"
-            git push
+            push_with_retry
             echo "nordlayer-bin: Pushed to AUR"
           fi
 
