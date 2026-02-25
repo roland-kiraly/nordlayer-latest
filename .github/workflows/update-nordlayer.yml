@@ -1,0 +1,51 @@
+name: Check for NordLayer Updates
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run update script
+        run: python3 update_pkgbuild.py
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            version=$(grep '^pkgver=' PKGBUILD | cut -d'=' -f2)
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.has_changes == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "Update nordlayer to ${{ steps.changes.outputs.version }}"
+          title: "Update nordlayer to ${{ steps.changes.outputs.version }}"
+          body: |
+            Automated update of NordLayer package to version ${{ steps.changes.outputs.version }}.
+
+            Changes made by the [update workflow](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).
+          branch: update/nordlayer-${{ steps.changes.outputs.version }}
+          delete-branch: true
