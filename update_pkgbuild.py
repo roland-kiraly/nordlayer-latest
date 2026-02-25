@@ -8,6 +8,14 @@ import os
 import sys
 
 
+def parse_version(version_str):
+    """Parse version string into tuple of integers for comparison."""
+    try:
+        return tuple(int(x) for x in version_str.split('.'))
+    except (ValueError, AttributeError):
+        return (0, 0, 0)
+
+
 def get_latest_version():
     """Get the latest NordLayer version by scraping the help page, with API fallback."""
     req_headers = {
@@ -216,6 +224,11 @@ if __name__ == '__main__':
 
     if latest_version == current_version:
         print('Already up to date.')
+        sys.exit(0)
+
+    if parse_version(latest_version) < parse_version(current_version):
+        print(f'Detected version ({latest_version}) is older than current ({current_version}).')
+        print('Refusing to downgrade. Exiting.')
         sys.exit(0)
 
     print(f'Updating {current_version} -> {latest_version}')
