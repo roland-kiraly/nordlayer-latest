@@ -7,6 +7,11 @@ import hashlib
 import os
 import sys
 
+PACKAGES = [
+    {'name': 'nordlayer', 'dir': '.'},
+    {'name': 'nordlayer-bin', 'dir': 'nordlayer-bin'},
+]
+
 
 def parse_version(version_str):
     """Parse version string into tuple of integers for comparison."""
@@ -64,9 +69,10 @@ def get_latest_version():
     return None
 
 
-def get_current_version():
+def get_current_version(pkg_dir):
     """Read the current pkgver from PKGBUILD."""
-    with open('PKGBUILD', 'r') as f:
+    pkgbuild_path = os.path.join(pkg_dir, 'PKGBUILD')
+    with open(pkgbuild_path, 'r') as f:
         for line in f:
             match = re.match(r'^pkgver=(.+)$', line)
             if match:
@@ -74,18 +80,19 @@ def get_current_version():
     return None
 
 
-def update_pkgver(version):
+def update_pkgver(pkg_dir, version):
     """Update pkgver and reset pkgrel in PKGBUILD."""
-    with open('PKGBUILD', 'r') as f:
+    pkgbuild_path = os.path.join(pkg_dir, 'PKGBUILD')
+    with open(pkgbuild_path, 'r') as f:
         pkgbuild = f.read()
 
     pkgbuild = re.sub(r'^pkgver=.*$', f'pkgver={version}', pkgbuild, flags=re.MULTILINE)
     pkgbuild = re.sub(r'^pkgrel=.*$', 'pkgrel=1', pkgbuild, flags=re.MULTILINE)
 
-    with open('PKGBUILD', 'w') as f:
+    with open(pkgbuild_path, 'w') as f:
         f.write(pkgbuild)
 
-    print(f'PKGBUILD pkgver updated to {version}.')
+    print(f'  PKGBUILD pkgver updated to {version}.')
 
 
 def download_deb(version):
@@ -95,6 +102,10 @@ def download_deb(version):
         f"nordlayer_{version}_amd64.deb"
     )
     filename = f"nordlayer_{version}_amd64.deb"
+    if os.path.exists(filename):
+        print(f"  Using cached {filename}")
+        return filename
+
     req_headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                       'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -105,7 +116,7 @@ def download_deb(version):
     with open(filename, 'wb') as f:
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
-    print(f"Downloaded {filename}")
+    print(f"  Downloaded {filename}")
     return filename
 
 
@@ -118,9 +129,10 @@ def calculate_checksum(filename):
     return sha512.hexdigest()
 
 
-def update_checksum(checksum):
+def update_checksum(pkg_dir, checksum):
     """Update the SHA-512 checksum in PKGBUILD."""
-    with open('PKGBUILD', 'r') as f:
+    pkgbuild_path = os.path.join(pkg_dir, 'PKGBUILD')
+    with open(pkgbuild_path, 'r') as f:
         pkgbuild = f.read()
 
     pkgbuild = re.sub(
@@ -130,15 +142,18 @@ def update_checksum(checksum):
         flags=re.MULTILINE,
     )
 
-    with open('PKGBUILD', 'w') as f:
+    with open(pkgbuild_path, 'w') as f:
         f.write(pkgbuild)
 
-    print('Checksum updated in PKGBUILD.')
+    print('  Checksum updated in PKGBUILD.')
 
 
-def generate_srcinfo(version, checksum):
+def generate_srcinfo(pkg_dir, checksum):
     """Generate .SRCINFO from PKGBUILD metadata without requiring makepkg."""
-    with open('PKGBUILD', 'r') as f:
+    pkgbuild_path = os.path.join(pkg_dir, 'PKGBUILD')
+    srcinfo_path = os.path.join(pkg_dir, '.SRCINFO')
+
+    with open(pkgbuild_path, 'r') as f:
         pkgbuild = f.read()
 
     def get_value(key):
@@ -200,10 +215,10 @@ def generate_srcinfo(version, checksum):
     lines.append(f'pkgname = {pkgname}')
     lines.append('')
 
-    with open('.SRCINFO', 'w') as f:
+    with open(srcinfo_path, 'w') as f:
         f.write('\n'.join(lines))
 
-    print('.SRCINFO updated.')
+    print('  .SRCINFO updated.')
 
 
 def clean_up(filename):
@@ -212,30 +227,72 @@ def clean_up(filename):
         print(f"Removed temporary file {filename}")
 
 
+def update_package(pkg, latest_version, checksum):
+    """Update a single package."""
+    pkg_name = pkg['name']
+    pkg_dir = pkg['dir']
+
+    print(f"\n[{pkg_name}]")
+
+    current_version = get_current_version(pkg_dir)
+    print(f'  Current version: {current_version}')
+
+    if latest_version == current_version:
+        print('  Already up to date.')
+        return False
+
+    if parse_version(latest_version) < parse_version(current_version):
+        print(f'  Detected version ({latest_version}) is older than current ({current_version}).')
+        print('  Refusing to downgrade.')
+        return False
+
+    print(f'  Updating {current_version} -> {latest_version}')
+    update_pkgver(pkg_dir, latest_version)
+    update_checksum(pkg_dir, checksum)
+    generate_srcinfo(pkg_dir, checksum)
+    return True
+
+
 if __name__ == '__main__':
     latest_version = get_latest_version()
     if not latest_version:
         print('Could not determine the latest version.')
         sys.exit(1)
 
-    current_version = get_current_version()
-    print(f'Current version: {current_version}')
-    print(f'Latest version:  {latest_version}')
+    print(f'Latest upstream version: {latest_version}')
 
-    if latest_version == current_version:
-        print('Already up to date.')
-        sys.exit(0)
+    deb_filename = None
+    checksum = None
+    any_updated = False
 
-    if parse_version(latest_version) < parse_version(current_version):
-        print(f'Detected version ({latest_version}) is older than current ({current_version}).')
-        print('Refusing to downgrade. Exiting.')
-        sys.exit(0)
+    for pkg in PACKAGES:
+        current = get_current_version(pkg['dir'])
+        if current != latest_version and parse_version(latest_version) > parse_version(current):
+            if deb_filename is None:
+                print(f"\nDownloading .deb for version {latest_version}...")
+                deb_filename = download_deb(latest_version)
+                checksum = calculate_checksum(deb_filename)
+                print(f"  Checksum: {checksum[:16]}...")
+            break
 
-    print(f'Updating {current_version} -> {latest_version}')
-    update_pkgver(latest_version)
-    deb_filename = download_deb(latest_version)
-    checksum = calculate_checksum(deb_filename)
-    update_checksum(checksum)
-    generate_srcinfo(latest_version, checksum)
-    clean_up(deb_filename)
-    print('All updates completed successfully.')
+    for pkg in PACKAGES:
+        if checksum:
+            updated = update_package(pkg, latest_version, checksum)
+            if updated:
+                any_updated = True
+        else:
+            print(f"\n[{pkg['name']}]")
+            current = get_current_version(pkg['dir'])
+            print(f'  Current version: {current}')
+            if current == latest_version:
+                print('  Already up to date.')
+            elif parse_version(latest_version) < parse_version(current):
+                print(f'  Refusing to downgrade from {current} to {latest_version}.')
+
+    if deb_filename:
+        clean_up(deb_filename)
+
+    if any_updated:
+        print('\nAll updates completed successfully.')
+    else:
+        print('\nNo updates needed.')

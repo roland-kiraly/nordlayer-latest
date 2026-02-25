@@ -43,7 +43,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add PKGBUILD .SRCINFO
+          git add PKGBUILD .SRCINFO nordlayer-bin/PKGBUILD nordlayer-bin/.SRCINFO
           git commit -m "Update nordlayer to ${{ steps.upstream.outputs.version }}"
           git push
 
@@ -69,18 +69,34 @@ jobs:
           eval "$(ssh-agent -s)"
           ssh-add ~/.ssh/aur
 
-      - name: Sync to AUR
+      - name: Sync nordlayer to AUR
         run: |
-          git clone ssh://aur@aur.archlinux.org/nordlayer.git aur-repo
-          cp PKGBUILD .SRCINFO nordlayer.install aur-repo/
-          cd aur-repo
+          git clone ssh://aur@aur.archlinux.org/nordlayer.git aur-nordlayer
+          cp PKGBUILD .SRCINFO nordlayer.install aur-nordlayer/
+          cd aur-nordlayer
           git config user.name "Roland Kiraly"
           git config user.email "rolandgyulakiraly@outlook.com"
           git add -A
           if git diff --cached --quiet; then
-            echo "AUR is already in sync"
+            echo "nordlayer: AUR is already in sync"
           else
             git commit -m "Update to ${{ steps.upstream.outputs.version }}-${{ steps.upstream.outputs.pkgrel }}"
             git push
-            echo "Pushed to AUR"
+            echo "nordlayer: Pushed to AUR"
+          fi
+
+      - name: Sync nordlayer-bin to AUR
+        run: |
+          git clone ssh://aur@aur.archlinux.org/nordlayer-bin.git aur-nordlayer-bin
+          cp nordlayer-bin/PKGBUILD nordlayer-bin/.SRCINFO nordlayer-bin/nordlayer-bin.install aur-nordlayer-bin/
+          cd aur-nordlayer-bin
+          git config user.name "Roland Kiraly"
+          git config user.email "rolandgyulakiraly@outlook.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "nordlayer-bin: AUR is already in sync"
+          else
+            git commit -m "Update to ${{ steps.upstream.outputs.version }}-${{ steps.upstream.outputs.pkgrel }}"
+            git push
+            echo "nordlayer-bin: Pushed to AUR"
           fi
